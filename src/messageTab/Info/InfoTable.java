@@ -7,6 +7,7 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 
 import javax.swing.JTable;
@@ -19,7 +20,6 @@ import javax.swing.table.TableRowSorter;
 import org.apache.commons.lang3.StringUtils;
 
 import com.bit4woo.utilbox.utils.SystemUtils;
-import com.bit4woo.utilbox.utils.UrlUtils;
 
 import base.FindUrlAction;
 import burp.BurpExtender;
@@ -124,7 +124,8 @@ public class InfoTable extends JTable {
 					InfoTable target = (InfoTable) e.getSource();
 					int row = target.getSelectedRow();
 					int column = target.getSelectedColumn();
-
+					
+					if (column ==-1) return;
 					//双击浏览器打开url
 					if (headers[column].equalsIgnoreCase("Value")) {//双击url在浏览器中打开
 						try {
@@ -138,7 +139,7 @@ public class InfoTable extends JTable {
 								} else {
 									List<String> urls = new ArrayList<>();
 									urls.add(url);
-									doRequestUrl(urls);
+									doOpenUrlInBrowser(urls);
 								}
 							}
 						} catch (Exception e1) {
@@ -168,42 +169,99 @@ public class InfoTable extends JTable {
 		});
 	}
 
-	public String getTargetBaseUrl() {
+	public String getOriginUrl() {
 		IMessageEditorController controller = infoPanel.getInfoTab().getController();
-		return FindUrlAction.getTargetSiteBaseUrl(controller.getHttpService(), controller.getRequest());
+		return FindUrlAction.getOriginUrlOfMessage(controller.getHttpService(), controller.getRequest());
 	}
 
+	public String getReferUrl() {
+		IMessageEditorController controller = infoPanel.getInfoTab().getController();
+		return FindUrlAction.getReferUrlOfMessage(controller.getHttpService(), controller.getRequest());
+	}
+	
+	public String getFullUrl() {
+		IMessageEditorController controller = infoPanel.getInfoTab().getController();
+		return FindUrlAction.getFullUrlOfMessage(controller.getHttpService(), controller.getRequest());
+	}
+	
+	
 	public List<String> getAllUrlsOfTarget() {
 		IMessageEditorController controller = infoPanel.getInfoTab().getController();
 		return FindUrlAction.FindAllUrlsOfTarget(controller.getHttpService(), controller.getRequest(), controller.getResponse());
 	}
-
+	
+	/**
+	 * 增加基于refer和当前URL的过滤
+	 * @param allUrlsOfTarget
+	 * @return
+	 */
 	public String choseBaseUrlToRequest(List<String> allUrlsOfTarget) {
-		return FindUrlAction.choseAndEditBaseURL(allUrlsOfTarget);
+		String referUrl = getReferUrl();
+		String currentUrl = getFullUrl();
+		String baseUrl = FindUrlAction.choseAndEditBaseURL(allUrlsOfTarget,referUrl,currentUrl);
+		infoPanel.displayBaseUrl(baseUrl);
+		return baseUrl;
+	}
+	/**
+	 * 从已有记录中直接获取【构建URL所需要的基准URL（BaseURL）】，或者从数据包中查找并选择 
+	 * @return
+	 */
+	public String getOrFindBaseUrl() {
+		String originUrl = getOriginUrl();
+
+		String baseurl = FindUrlAction.httpServiceBaseUrlMap.get(originUrl);
+		if (StringUtils.isEmpty(baseurl)) {
+			baseurl = choseBaseUrlToRequest(getAllUrlsOfTarget());
+			if (StringUtils.isNotEmpty(originUrl) && StringUtils.isNotEmpty(baseurl)) {
+				FindUrlAction.httpServiceBaseUrlMap.put(originUrl, baseurl);
+			}
+		}
+		((InfoPanelHeadPanel)(InfoPanel.getHeadPanel())).setBaseUrl(baseurl.trim());
+		return baseurl;
 	}
 
 	public void doRequestUrl(List<String> urlsToRequest) {
-		String targetBaseUrl = getTargetBaseUrl();
+		String targetBaseUrl = getOrFindBaseUrl();
+		List<String> full_urls = FindUrlAction.buildUrls(targetBaseUrl, urlsToRequest);
+		HashMap<String, String> headers = new HashMap<>();
+		headers.put("Referer", targetBaseUrl);
+		FindUrlAction.doSendRequest(full_urls, headers);
+	}
 
-		String baseurl = FindUrlAction.httpServiceBaseUrlMap.get(targetBaseUrl);
-		if (StringUtils.isEmpty(baseurl)) {
-			baseurl = choseBaseUrlToRequest(getAllUrlsOfTarget());
-			if (StringUtils.isNotEmpty(targetBaseUrl) && StringUtils.isNotEmpty(baseurl)) {
-				FindUrlAction.httpServiceBaseUrlMap.put(targetBaseUrl, baseurl);
+	public void doOpenUrlInBrowser(List<String> urlsOrPathsToRequest) {
+		List<String> full_urls;
+		if (needBaseUrl(urlsOrPathsToRequest)) {
+			String targetBaseUrl = getOrFindBaseUrl();
+			full_urls = FindUrlAction.buildUrls(targetBaseUrl, urlsOrPathsToRequest);
+		}else {
+			full_urls = urlsOrPathsToRequest;
+		}
+		
+		String browserPath = BurpExtender.getConfigTableModel().getConfigValueByKey("browserPath");
+		for (String url:full_urls) {
+			SystemUtils.browserOpen(url, browserPath);
+		}
+	}
+	
+	public boolean needBaseUrl(List<String> urlsToRequest) {
+		
+		for (String urlOrPath:urlsToRequest) {
+			if (StringUtils.isNotBlank(urlOrPath)) {
+				if (!urlOrPath.toLowerCase().startsWith("http://") && !urlOrPath.toLowerCase().startsWith("https://")) {
+					return true;
+				}
 			}
 		}
-
-		FindUrlAction.doSendRequest(baseurl, urlsToRequest, targetBaseUrl);
+		return false;
 	}
 
 	public List<String> getSelectedUrls() {
 		int[] rows = this.getSelectedRows();
 		List<String> result = new ArrayList<>();
 		for (int row : rows) {
-			List<String> line = new ArrayList<>();
 			try {
 				String value = (String) this.getValueAt(row, 0);
-				if (UrlUtils.isVaildUrl(value)) {
+				if (!value.contains("@")) {
 					result.add(value);
 				}
 			} catch (Exception e) {
@@ -213,9 +271,15 @@ public class InfoTable extends JTable {
 		return result;
 	}
 
+	
 	public String getSelectedContent() {
 		int[] rows = this.getSelectedRows();
 		int[] columns = this.getSelectedColumns();
+		
+	    if (rows == null || rows.length == 0 || columns == null || columns.length == 0) {
+	        return ""; // 或者 return null;
+	    }
+	    
 		List<String> result = new ArrayList<>();
 		for (int row : rows) {
 			List<String> line = new ArrayList<>();

@@ -23,11 +23,23 @@ public class InfoPanel extends JPanel {
     private final JLabel statusLabel = new JLabel("   0 matches");
     boolean isRequest;
     
-    InfoTable table;
+    public static JPanel headPanel;
+    public InfoTable table;
 	private InfoTab InfoTab;
 
 	
-    public InfoTab getInfoTab() {
+	
+    public static JPanel getHeadPanel() {
+		return headPanel;
+	}
+
+
+	public static void setHeadPanel(JPanel headPanel) {
+		InfoPanel.headPanel = headPanel;
+	}
+
+
+	public InfoTab getInfoTab() {
 		return InfoTab;
 	}
 
@@ -52,8 +64,8 @@ public class InfoPanel extends JPanel {
         setBorder(new EmptyBorder(5, 5, 5, 5));
         setLayout(new BorderLayout(0, 0));
 
-        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER));
-        add(buttonPanel, BorderLayout.NORTH);
+        headPanel = new InfoPanelHeadPanel();
+        add(headPanel, BorderLayout.NORTH);
 
         InfoTableModel model = new InfoTableModel();
         table = new InfoTable(model,this);
@@ -107,6 +119,11 @@ public class InfoPanel extends JPanel {
         add(footPanel, BorderLayout.SOUTH);
     }
 
+	public void displayBaseUrl(String baseUrl) {
+		if (headPanel !=null) {
+			((InfoPanelHeadPanel)headPanel).setBaseUrl(baseUrl.trim());
+		}
+	}
 
     private Timer createSearchTimer() {
         Timer searchTimer = new Timer(1000, new ActionListener() {
